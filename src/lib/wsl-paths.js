@@ -18,6 +18,8 @@ function isWindowsNative({ env = process.env, platform = process.platform } = {}
 function resolveWslShareRoots({ env = process.env, platform = process.platform } = {}) {
   const explicit = splitEnvList(env.TOKENTRACKER_WSL_ROOTS);
   if (explicit.length > 0) return explicit;
+  if (env.TOKENTRACKER_DISABLE_WSL_DISCOVERY === "1") return [];
+  if (isLikelyIsolatedTempHome(env)) return [];
   if (!isWindowsNative({ env, platform })) return [];
   return ["\\\\wsl$", "\\\\wsl.localhost"];
 }
@@ -102,8 +104,20 @@ function addUnique(out, seen, value) {
   out.push(value);
 }
 
+function isLikelyIsolatedTempHome(env = process.env) {
+  if (typeof env.HOME !== "string" || !env.HOME.trim()) return false;
+  try {
+    const home = path.resolve(env.HOME);
+    const tmp = path.resolve(os.tmpdir());
+    return home === tmp || home.startsWith(`${tmp}${path.sep}`);
+  } catch (_err) {
+    return false;
+  }
+}
+
 module.exports = {
   isWindowsNative,
+  isLikelyIsolatedTempHome,
   listWslDistroNames,
   listWslHomeDirs,
   resolveWslShareRoots,

@@ -33,7 +33,7 @@ const { probeOpenclawHookState } = require("../lib/openclaw-hook");
 const {
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
-const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolveHomeDir, resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveKimiWireFiles,
   resolveHermesDbPaths,
@@ -61,7 +61,7 @@ async function cmdStatus(argv = []) {
     return;
   }
 
-  const home = os.homedir();
+  const home = resolveHomeDir(process.env);
   const { trackerDir, binDir } = await resolveTrackerPaths({ home });
   const configPath = path.join(trackerDir, "config.json");
   const queuePath = path.join(trackerDir, "queue.jsonl");

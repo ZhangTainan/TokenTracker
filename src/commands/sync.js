@@ -67,7 +67,7 @@ const {
   parseCursorCsv,
 } = require("../lib/cursor-config");
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
-const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolveHomeDir, resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
 const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
@@ -103,7 +103,7 @@ const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v4";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
-  const home = os.homedir();
+  const home = resolveHomeDir(process.env);
   const { trackerDir } = await resolveTrackerPaths({ home });
 
   await ensureDir(trackerDir);

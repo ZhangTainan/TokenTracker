@@ -6,6 +6,7 @@ const cp = require("node:child_process");
 
 const crypto = require("node:crypto");
 const { ensureDir } = require("./fs");
+const { resolveHomeDir } = require("./tracker-paths");
 const { listWslHomeDirs } = require("./wsl-paths");
 
 const DEFAULT_SOURCE = "codex";
@@ -2698,7 +2699,7 @@ async function parseCursorApiIncremental({
 // ---------------------------------------------------------------------------
 
 function resolveKiroBasePath() {
-  const home = require("node:os").homedir();
+  const home = resolveHomeDir(process.env);
   return path.join(
     home,
     "Library",
@@ -3006,7 +3007,7 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
 // Hermes Agent — SQLite-based (sessions table in ~/.hermes/state.db)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveHermesDbPaths({ home = require("node:os").homedir(), env = process.env } = {}) {
+function resolveHermesDbPaths({ home = resolveHomeDir(env), env = process.env } = {}) {
   const out = [];
   const seen = new Set();
 
@@ -4157,7 +4158,7 @@ async function parseKiroCliFromSessionFiles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveKimiWireFiles(env = process.env) {
-  const home = require("node:os").homedir();
+  const home = resolveHomeDir(env);
   const kimiHome = env.KIMI_HOME || path.join(home, ".kimi");
   const sessionsDir = path.join(kimiHome, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
@@ -6008,7 +6009,7 @@ function resolveGrokBuildHome(env = process.env) {
   return (
     env.TOKENTRACKER_GROK_HOME ||
     env.GROK_HOME ||
-    path.join(require("node:os").homedir(), ".grok")
+    path.join(resolveHomeDir(env), ".grok")
   );
 }
 

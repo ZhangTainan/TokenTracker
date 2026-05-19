@@ -1,7 +1,11 @@
 const os = require("node:os");
 const path = require("node:path");
 
-async function resolveTrackerPaths({ home = os.homedir() } = {}) {
+function resolveHomeDir(env = process.env) {
+  return env.TOKENTRACKER_HOME || env.HOME || os.homedir();
+}
+
+async function resolveTrackerPaths({ home = resolveHomeDir() } = {}) {
   const rootDir = path.join(home, ".tokentracker");
   return {
     rootDir,
@@ -12,5 +16,6 @@ async function resolveTrackerPaths({ home = os.homedir() } = {}) {
 }
 
 module.exports = {
+  resolveHomeDir,
   resolveTrackerPaths,
 };
