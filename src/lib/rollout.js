@@ -6,6 +6,7 @@ const cp = require("node:child_process");
 
 const crypto = require("node:crypto");
 const { ensureDir } = require("./fs");
+const { listWslHomeDirs } = require("./wsl-paths");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -3005,9 +3006,43 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
 // Hermes Agent — SQLite-based (sessions table in ~/.hermes/state.db)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveHermesDbPath() {
-  const home = require("node:os").homedir();
-  return path.join(home, ".hermes", "state.db");
+function resolveHermesDbPaths({ home = require("node:os").homedir(), env = process.env } = {}) {
+  const out = [];
+  const seen = new Set();
+
+  const explicitDb = normalizeString(env.TOKENTRACKER_HERMES_DB_PATH) || normalizeString(env.HERMES_DB_PATH);
+  if (explicitDb) addUniquePath(out, seen, explicitDb);
+
+  const explicitHome =
+    normalizeString(env.TOKENTRACKER_HERMES_HOME) || normalizeString(env.HERMES_HOME);
+  if (explicitHome) addUniquePath(out, seen, path.join(explicitHome, "state.db"));
+
+  addUniquePath(out, seen, path.join(home, ".hermes", "state.db"));
+
+  for (const wslHome of listWslHomeDirs({ env })) {
+    addUniquePath(out, seen, path.join(wslHome, ".hermes", "state.db"));
+  }
+
+  return out;
+}
+
+function resolveHermesDbPath(options = {}) {
+  const paths = resolveHermesDbPaths(options);
+  return paths.find((candidate) => fssync.existsSync(candidate)) || paths[0];
+}
+
+function addUniquePath(out, seen, value) {
+  if (!value) return;
+  const key = path.resolve(value).toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push(value);
+}
+
+function normalizeString(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function readHermesSessions(dbPath, lastCompletedEpoch) {
@@ -3017,15 +3052,33 @@ function readHermesSessions(dbPath, lastCompletedEpoch) {
   // in-progress (ended_at IS NULL).  Hermes updates token counts in real-time,
   // so an active session keeps growing and must be re-read on every sync.
   const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
+  return readHermesRowsWithSql(dbPath, sql);
+}
+
+function readHermesRowsWithSql(dbPath, sql) {
   let raw;
   try {
     raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
       timeout: 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-  } catch (_e) {
-    return [];
+  } catch (_sqliteCliErr) {
+    const snapshotRows = readHermesRowsFromSnapshot(dbPath, sql);
+    if (snapshotRows) return snapshotRows;
+
+    try {
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        return db.prepare(sql).all();
+      } finally {
+        db.close();
+      }
+    } catch (_nodeSqliteErr) {
+      return [];
+    }
   }
   if (!raw || !raw.trim()) return [];
   let rows;
@@ -3035,6 +3088,54 @@ function readHermesSessions(dbPath, lastCompletedEpoch) {
     return [];
   }
   return Array.isArray(rows) ? rows : [];
+}
+
+function readHermesRowsFromSnapshot(dbPath, sql) {
+  let tmpDir = null;
+  try {
+    const os = require("node:os");
+    tmpDir = fssync.mkdtempSync(path.join(os.tmpdir(), "tokentracker-hermes-"));
+    const snapshotPath = path.join(tmpDir, "state.db");
+    fssync.copyFileSync(dbPath, snapshotPath);
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${dbPath}${suffix}`;
+      if (fssync.existsSync(sidecar)) {
+        fssync.copyFileSync(sidecar, `${snapshotPath}${suffix}`);
+      }
+    }
+
+    return readHermesRowsWithSqlNoSnapshot(snapshotPath, sql);
+  } catch (_err) {
+    return null;
+  } finally {
+    if (tmpDir) fssync.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+function readHermesRowsWithSqlNoSnapshot(dbPath, sql) {
+  try {
+    const raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 15_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (!raw || !raw.trim()) return [];
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch (_sqliteCliErr) {
+    try {
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        return db.prepare(sql).all();
+      } finally {
+        db.close();
+      }
+    } catch (_nodeSqliteErr) {
+      return null;
+    }
+  }
 }
 
 async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }) {
@@ -6140,6 +6241,7 @@ module.exports = {
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesDbPath,
+  resolveHermesDbPaths,
   resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,

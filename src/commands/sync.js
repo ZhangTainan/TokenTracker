@@ -6,6 +6,7 @@ const cp = require("node:child_process");
 const readline = require("node:readline");
 
 const { ensureDir, readJson, writeJson, openLock } = require("../lib/fs");
+const { listWslHomeDirs } = require("../lib/wsl-paths");
 const {
   listRolloutFiles,
   listClaudeProjectFiles,
@@ -15,6 +16,7 @@ const {
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesDbPath,
+  resolveHermesDbPaths,
   resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
@@ -472,7 +474,9 @@ async function cmdSync(argv) {
 
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const hermesDbPath = resolveHermesDbPath();
+    const hermesDbPath =
+      resolveHermesDbPaths({ home, env: process.env }).find((candidate) => fssync.existsSync(candidate)) ||
+      resolveHermesDbPath({ home, env: process.env });
     if (fssync.existsSync(hermesDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
@@ -887,6 +891,7 @@ module.exports = {
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
   reincludeClaudeMemObserverFiles,
+  resolveOpenclawSessionFiles,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
@@ -925,6 +930,79 @@ function resolveOpenclawSignal({ home, env } = {}) {
     sessionFile,
     prevTotals,
   };
+}
+
+async function resolveOpenclawSessionFiles({ home, env } = {}) {
+  const openclawHomes = resolveOpenclawHomes({ home, env });
+  const out = [];
+  const seen = new Set();
+
+  for (const openclawHome of openclawHomes) {
+    const files = await resolveOpenclawSessionFilesInHome(openclawHome);
+    for (const file of files) {
+      const key = path.resolve(file.path).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(file);
+    }
+  }
+
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function resolveOpenclawHomes({ home, env } = {}) {
+  const out = [];
+  const seen = new Set();
+  const explicit =
+    normalizeString(env?.TOKENTRACKER_OPENCLAW_HOME) ||
+    normalizeString(env?.OPENCLAW_STATE_DIR);
+  if (explicit) addUniquePath(out, seen, explicit);
+
+  addUniquePath(out, seen, path.join(home || os.homedir(), ".openclaw"));
+
+  for (const wslHome of listWslHomeDirs({ env })) {
+    addUniquePath(out, seen, path.join(wslHome, ".openclaw"));
+  }
+
+  return out;
+}
+
+async function resolveOpenclawSessionFilesInHome(openclawHome) {
+  const agentsDir = path.join(openclawHome, "agents");
+  let agentEntries = [];
+  try {
+    agentEntries = await fs.readdir(agentsDir, { withFileTypes: true });
+  } catch (_err) {
+    return [];
+  }
+
+  const out = [];
+  for (const agentEntry of agentEntries) {
+    if (!agentEntry.isDirectory()) continue;
+    const sessionsDir = path.join(agentsDir, agentEntry.name, "sessions");
+    let sessionEntries = [];
+    try {
+      sessionEntries = await fs.readdir(sessionsDir, { withFileTypes: true });
+    } catch (_err) {
+      continue;
+    }
+    for (const sessionEntry of sessionEntries) {
+      if (!sessionEntry.isFile()) continue;
+      const name = sessionEntry.name;
+      if (!name.endsWith(".jsonl")) continue;
+      if (name.endsWith(".trajectory.jsonl")) continue;
+      out.push({ path: path.join(sessionsDir, name), source: "openclaw" });
+    }
+  }
+  return out;
+}
+
+function addUniquePath(out, seen, value) {
+  if (!value) return;
+  const key = path.resolve(value).toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push(value);
 }
 
 async function applyOpenclawTotalsFallback({

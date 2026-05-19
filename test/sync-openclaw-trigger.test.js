@@ -4,7 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
-const { cmdSync } = require("../src/commands/sync");
+const { cmdSync, resolveOpenclawSessionFiles } = require("../src/commands/sync");
 
 async function readJsonl(filePath) {
   const raw = await fs.readFile(filePath, "utf8").catch(() => "");
@@ -299,6 +299,56 @@ test("sync --from-openclaw falls back to previous session totals when jsonl has 
     else process.env.TOKENTRACKER_OPENCLAW_PREV_MODEL = prevModel;
     if (prevUpdatedAt === undefined) delete process.env.TOKENTRACKER_OPENCLAW_PREV_UPDATED_AT;
     else process.env.TOKENTRACKER_OPENCLAW_PREV_UPDATED_AT = prevUpdatedAt;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+test("resolveOpenclawSessionFiles discovers session jsonl files and skips trajectories", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-sessions-"));
+  try {
+    const openclawHome = path.join(tmp, ".openclaw");
+    const sessionDir = path.join(openclawHome, "agents", "main", "sessions");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const sessionPath = path.join(sessionDir, "session-a.jsonl");
+    await fs.writeFile(sessionPath, "{}\n", "utf8");
+    await fs.writeFile(path.join(sessionDir, "session-a.trajectory.jsonl"), "{}\n", "utf8");
+    await fs.writeFile(path.join(sessionDir, "sessions.json"), "{}\n", "utf8");
+
+    const files = await resolveOpenclawSessionFiles({
+      home: tmp,
+      env: { TOKENTRACKER_OPENCLAW_HOME: openclawHome },
+    });
+
+    assert.deepEqual(files, [{ path: sessionPath, source: "openclaw" }]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveOpenclawSessionFiles discovers Windows WSL OpenClaw sessions", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-wsl-"));
+  try {
+    const wslRoot = path.join(tmp, "wsl");
+    const sessionDir = path.join(
+      wslRoot,
+      "Ubuntu",
+      "home",
+      "alice",
+      ".openclaw",
+      "agents",
+      "main",
+      "sessions",
+    );
+    await fs.mkdir(sessionDir, { recursive: true });
+    const sessionPath = path.join(sessionDir, "session-wsl.jsonl");
+    await fs.writeFile(sessionPath, "{}\n", "utf8");
+
+    const files = await resolveOpenclawSessionFiles({
+      home: tmp,
+      env: { TOKENTRACKER_WSL_ROOTS: wslRoot },
+    });
+
+    assert.deepEqual(files, [{ path: sessionPath, source: "openclaw" }]);
+  } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });

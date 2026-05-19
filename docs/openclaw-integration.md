@@ -26,6 +26,16 @@ During `tokentracker init`, TokenTracker:
 
 The plugin only emits token counts and timestamps. It never reads or transmits prompt or response content.
 
+### Windows + WSL
+
+If OpenClaw runs inside WSL but TokenTracker runs on Windows, TokenTracker also scans OpenClaw session logs through `\\wsl$` / `\\wsl.localhost`:
+
+```
+\\wsl$\<distro>\home\<user>\.openclaw\agents\*\sessions\*.jsonl
+```
+
+This passive scan can monitor token usage from the Windows app/CLI even when the OpenClaw plugin is installed inside WSL instead of Windows. Set `TOKENTRACKER_WSL_DISTROS=Ubuntu` to restrict discovery to one distro, or `TOKENTRACKER_OPENCLAW_HOME` to point at a specific `.openclaw` directory.
+
 ## Verifying the install
 
 Run:

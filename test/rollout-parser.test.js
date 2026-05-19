@@ -12,6 +12,7 @@ const {
   parseOpencodeIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
+  resolveHermesDbPaths,
   parseCopilotIncremental,
   parseKimiIncremental,
   parseCodebuddyIncremental,
@@ -2768,6 +2769,25 @@ test("parseHermesIncremental returns zero for nonexistent database", async () =>
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
     assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveHermesDbPaths includes Windows WSL Hermes databases", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-wsl-"));
+  try {
+    const wslRoot = path.join(tmp, "wsl");
+    const dbPath = path.join(wslRoot, "Ubuntu", "home", "alice", ".hermes", "state.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    await fs.writeFile(dbPath, "", "utf8");
+
+    const paths = resolveHermesDbPaths({
+      home: tmp,
+      env: { TOKENTRACKER_WSL_ROOTS: wslRoot },
+    });
+
+    assert.ok(paths.includes(dbPath));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

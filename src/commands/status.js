@@ -36,6 +36,7 @@ const {
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveKimiWireFiles,
+  resolveHermesDbPaths,
   resolveKiroCliDbPath,
   resolveCodebuddyHome,
   resolveCodebuddyProjectFiles,
@@ -50,6 +51,7 @@ const {
   resolveGrokBuildSessions,
 } = require("../lib/rollout");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
+const { resolveOpenclawSessionFiles } = require("./sync");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -140,6 +142,12 @@ async function cmdStatus(argv = []) {
     trackerDir,
     env: process.env,
   });
+  const openclawSessionFiles = await resolveOpenclawSessionFiles({
+    home,
+    env: process.env,
+  });
+  const hermesDbPaths = resolveHermesDbPaths({ home, env: process.env });
+  const hermesDbPath = hermesDbPaths.find((candidate) => fssync.existsSync(candidate));
 
   const lastUpload = uploadThrottle.lastSuccessMs
     ? parseEpochMsToIso(uploadThrottle.lastSuccessMs)
@@ -250,6 +258,12 @@ async function cmdStatus(argv = []) {
       `- Opencode plugin: ${opencodePluginConfigured ? "set" : "unset"}`,
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
+      openclawSessionFiles.length > 0
+        ? `- OpenClaw passive reader: ${openclawSessionFiles.length} session jsonl file${openclawSessionFiles.length !== 1 ? "s" : ""} found`
+        : null,
+      hermesDbPath
+        ? `- Hermes Agent: passive reader (${hermesDbPath})`
+        : null,
       kimiInstalled
         ? `- Kimi Code: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
         : null,
